@@ -1,0 +1,49 @@
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.cross_decomposition import CCA
+
+def zscore_np(X: np.ndarray) -> np.ndarray:
+    """Z-score columns of X (n_samples x n_features)."""
+    return StandardScaler().fit_transform(X.astype(float))
+
+def get_canonical_corrs(X: np.ndarray, Y: np.ndarray, n_components: int = 2,
+                        max_iter: int = 1000) -> np.ndarray:
+    """
+    Fit CCA and return canonical correlations [r1, r2, ...].
+    X, Y must be aligned with same number of rows.
+    """
+    cca = CCA(n_components=n_components, max_iter=max_iter)
+    X_c, Y_c = cca.fit_transform(X, Y)
+
+    cors = []
+    for i in range(n_components):
+        r = np.corrcoef(X_c[:, i], Y_c[:, i])[0, 1]
+        cors.append(r)
+    return np.asarray(cors, float)
+
+def permutation_test_maxstat(X: np.ndarray, Y: np.ndarray, n_perm: int = 1000,
+                             n_components: int = 2, random_state: int = 0,
+                             max_iter: int = 1000) -> np.ndarray:
+    """
+    Permute rows of Y, recompute CCA each time.
+    Null distribution is max canonical corr per permutation (FWER control).
+    Returns null_dist_max (n_perm,).
+    """
+    rng = np.random.default_rng(random_state)
+    n = Y.shape[0]
+    null_dist_max = np.empty(n_perm, float)
+
+    for p in range(n_perm):
+        idx = rng.permutation(n)
+        Y_perm = Y[idx, :]
+        perm_corrs = get_canonical_corrs(X, Y_perm, n_components=n_components, max_iter=max_iter)
+        null_dist_max[p] = np.nanmax(perm_corrs)
+
+    return null_dist_max
+
+def fwer_pvals_from_null(null_max: np.ndarray, obs_corrs: np.ndarray) -> np.ndarray:
+    """FWER p-values using max-stat null; includes +1 correction."""
+    null_max = np.asarray(null_max, float)
+    obs_corrs = np.asarray(obs_corrs, float)
+    n_perm = len(null_max)
+    return np.array([(1 + np.sum(null_max >= r)) / (n_perm + 1) for r in obs_corrs], float)
